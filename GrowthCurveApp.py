@@ -127,6 +127,23 @@ class GrowthCurveApp(QtGui.QWidget):
         self.savePlotBtn.clicked.connect(self.onSavePlotPush)
         self.UILayout.addWidget(self.savePlotBtn)
 
+        #For normalising plots
+        self.normalisePlot = QtGui.QPushButton("Normalise plots")
+        self.normalisePlot.setToolTip("Normalise data against first point.")
+        self.normalisePlot.setCheckable(True)
+        self.normalisePlot.setIcon(self.style().standardIcon(QtGui.QStyle.SP_DialogOkButton))
+        self.normalisePlot.setIconSize(QtCore.QSize(24,24))
+        self.normalisePlot.clicked.connect(self.onNormalisePlot)
+        self.UILayout.addWidget(self.normalisePlot)
+
+        #For generating callibration curve
+        self.calibrateBtn = QtGui.QPushButton("Gen call plot")
+        self.calibrateBtn.setToolTip("Generate callibration data for selected plot.")
+        self.calibrateBtn.setIcon(self.style().standardIcon(QtGui.QStyle.SP_DialogOkButton))
+        self.calibrateBtn.setIconSize(QtCore.QSize(24,24))
+        self.calibrateBtn.clicked.connect(self.onCallPress)
+        self.UILayout.addWidget(self.calibrateBtn)
+
         #Table for doubling times
         self.dataTable = QtGui.QTableWidget()
         self.dataTable.setRowCount(0)
@@ -236,11 +253,11 @@ class GrowthCurveApp(QtGui.QWidget):
 
     def addPlot(self):
         x = self.dataDic["Times"][-1]
-        y= np.asarray(self.dataDic["ODs"][-1])
-        y = [i-y[0] for i in y]
+        yo= np.asarray(self.dataDic["ODs"][-1])
+        y = [i-yo[0] for i in yo]
         #y = [i-y[0] for i in y]
         linearPlot = pg.ScatterPlotItem(pen=(self.dataDic["ID"][-1],len(self.dataDic["ID"])))
-        linearPlot.setData(x,y,label=self.dataDic["FileNames"][-1])
+        linearPlot.setData(x,yo,label=self.dataDic["FileNames"][-1])
         self.dataDic["LinearPlots"].append(linearPlot)
         self.linearPlot.addItem(linearPlot)
 
@@ -252,7 +269,6 @@ class GrowthCurveApp(QtGui.QWidget):
         self.logPlot.addItem(logPlot)
 
         logFitPlot = pg.PlotCurveItem(pen=(self.dataDic["ID"][-1],len(self.dataDic["ID"])))
-
         xfit, yfit, doublingTime = self.getLogFit(self.dataDic["ID"][-1])
         logFitPlot.setData(xfit,yfit)
         self.logPlot.addItem(logFitPlot)
@@ -292,6 +308,11 @@ class GrowthCurveApp(QtGui.QWidget):
         ID = int(ID)
         index = self.dataDic["ID"].index(ID)
         if self.dataDic["CheckBoxes"][index].isChecked():
+            x = self.dataDic["Times"][index]
+            y = self.dataDic["ODs"][index]
+            if self.normalisePlot.isChecked():
+                y = [y[i]-y[0] for i in range(len(y))]
+            self.dataDic["LinearPlots"][index].setData(x,y)
             self.linearPlot.addItem(self.dataDic["LinearPlots"][index])
 
             self.logPlot.addItem(self.dataDic["LogPlots"][index])
@@ -559,10 +580,14 @@ class GrowthCurveApp(QtGui.QWidget):
         x,y = self.dataDic["LogPlots"][index].getData()
         minValue = self.dataDic["MinSliders"][index].value()
         maxValue = self.dataDic["MaxSliders"][index].value()
-        slope, intercept, r_value, p_value, std_err = stats.linregress(x[minValue:maxValue],y[minValue:maxValue])
-        xfit = np.linspace(x[minValue],x[maxValue-1],1000)
-        yfit = slope*xfit + intercept
-        doublingTime = 60.0*np.log(2)/slope
+        doublingTime = 0
+        xfit = []
+        yfit = []
+        if len(x) > 0:
+            slope, intercept, r_value, p_value, std_err = stats.linregress(x[minValue:maxValue],y[minValue:maxValue])
+            xfit = np.linspace(x[minValue],x[maxValue-1],1000)
+            yfit = slope*xfit + intercept
+            doublingTime = 60.0*np.log(2)/slope
         self.dataDic["DoublingTimes"][index] = doublingTime
         return xfit,yfit, doublingTime
 
@@ -681,12 +706,12 @@ class GrowthCurveApp(QtGui.QWidget):
                         "color: rgb(20,20,20);"
                         "}")
                         btn.clicked.connect(partial(self.onPlateButtonPress,plateDic))
-                        plateLayout.addWidget(btn,column,row)
+                        plateLayout.addWidget(btn,row,column)
                     index = [i for i in range(len(plateDic["IDs"])) if plateDic["Rows"][i] == rows[row] and
                             plateDic["Columns"][i]==columns[column] and plateDic["Channels"][i] == channels[channel]]
                     plateDic["Buttons"][index[0]] = btn
 
-        self.UILayout.insertLayout(5,plateLayout)
+        self.UILayout.insertLayout(6,plateLayout)
 
         #Add channel selector
         self.channelSelector = QtGui.QComboBox()
@@ -724,6 +749,27 @@ class GrowthCurveApp(QtGui.QWidget):
             if channel == plateDic["Channels"][i] and plateDic["Active"][i]==True:
                 plateDic["Buttons"][i].setChecked(True)
 
+    def onNormalisePlot(self):
+        for i in range(len(self.dataDic["ID"])):
+            visible =  self.dataDic["CheckBoxes"][i].isChecked()
+            if visible:
+                x = self.dataDic["Times"][i]
+                y = self.dataDic["ODs"][i]
+                #Should we be normalising
+                if self.normalisePlot.isChecked():
+                    y = [y[i]-y[0] for i in range(len(y))]
+
+                self.dataDic["LinearPlots"][i].setData(x,y)
+
+    def onCallPress(self):
+        C1 = CallibrationDialog(self.dataDic)
+        if C1.exec_():
+            ods ,averages = C1.getValues()
+            plt.plot(ods,averages,'o')
+            plt.xlabel("OD")
+            plt.ylabel("Biomass")
+            plt.show()
+
 #    def splineFit(self,x,y,S=0):
         #T = np.linspace(x[1],x[-2], max(3,S))
         #yPredict = interpolate.splrep(x, y,s=0,t=T)
@@ -736,9 +782,71 @@ class GrowthCurveApp(QtGui.QWidget):
         #self.replot()
         #self.dataTable.blockSignals(False)
 
+class CallibrationDialog(QtGui.QDialog):
+
+    def __init__(self,dataDic,parent=None):
+        QtGui.QDialog.__init__(self,parent)
+        self.dataDic = dataDic
+        self.setWindowTitle("Add callibration data")
+        self.setUpUI()
+        self.setUpMainWidget()
+
+    def setUpMainWidget(self):
+        self.mainWidget = QtGui.QWidget()
+        self.mainLayout = QtGui.QGridLayout()
+        self.mainLayout.addLayout(self.uiLayout,0,0)
+        self.setLayout(self.mainLayout)
+        self.show()
+
+    def setUpUI(self):
+        self.uiLayout = QtGui.QGridLayout()
+        #Table for data
+        self.table = QtGui.QTableWidget()
+        self.table.setRowCount(np.sum([self.dataDic["CheckBoxes"][i].isChecked() for i in range(len(self.dataDic["CheckBoxes"]))]))
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(["Cell","Average reading","OD"])
+        self.table.setSizeAdjustPolicy(QtWidgets.QAbstractScrollArea.AdjustToContents)
+        self.table.resizeColumnsToContents()
+        self.uiLayout.addWidget(self.table,0,0,1,2)
+        self.populateTable()
+
+        #OK button
+        okButton = QtGui.QPushButton("OK")
+        okButton.clicked.connect(self.onOK)
+        self.uiLayout.addWidget(okButton,1,0,1,1)
+
+        #Cancel button
+        cancelButton = QtGui.QPushButton("Cancel")
+        cancelButton.clicked.connect(self.onCancel)
+        self.uiLayout.addWidget(cancelButton,1,1,1,1)
+
+    def onOK(self):
+        self.done(1)
+
+    def onCancel(self):
+        self.done(0)
+
+    def populateTable(self):
+        cells = []
+        self.averages = []
+        for i,cell in enumerate(self.dataDic["FileNames"]):
+            if self.dataDic["CheckBoxes"][i].isChecked():
+                cells.append(self.dataDic["FileNames"][i])
+                self.averages.append(np.mean(self.dataDic["ODs"][i]))
+        for row in range(self.table.rowCount()):
+            self.table.setItem(row,0, QtGui.QTableWidgetItem(str(cells[row])))
+            self.table.setItem(row,1, QtGui.QTableWidgetItem(str(round(self.averages[row],1))))
+
+    def getValues(self):
+        #Read last oclumn
+        ods = []
+        for row in range(self.table.rowCount()):
+            ods.append(float(self.table.item(row,2).text()))
+        return ods,self.averages
+
+
 if __name__ == '__main__':
     from GrowthCurveApp import GrowthCurveApp
-
     GCA1 = GrowthCurveApp()
     GCA1.run()
     exit()
